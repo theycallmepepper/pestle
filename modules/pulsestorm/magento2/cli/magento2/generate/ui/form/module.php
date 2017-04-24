@@ -252,9 +252,111 @@ function createCollectionClassNameFromModelName($modelClass)
 function createDataProviderUseString($module_info, $modelClass)
 {
     $collectionClassName = createCollectionClassNameFromModelName($modelClass);
-        
+
     return 'use '.$collectionClassName.';
 use Magento\Framework\App\Request\DataPersistorInterface;';
+}
+
+function createViewDataProviderUseString($module_info, $modelClass)
+{
+    $collectionClassName = createCollectionClassNameFromModelName($modelClass);
+
+    return 'use '.$collectionClassName.';
+use Magento\Framework\Api\FilterBuilder;
+use Magento\Framework\Api\Search\ReportingInterface;
+use Magento\Framework\Api\Search\SearchCriteriaBuilder;
+use Magento\Framework\App\RequestInterface;
+use Magento\Framework\App\Request\DataPersistorInterface;';
+}
+
+function createViewDataProviderClassBodyString($module_info, $modelClass)
+{
+    $persistKey = getPersistKeyFromModelClassName($modelClass);
+    return '
+
+    protected $collection;
+
+    /**
+     * @var DataPersistorInterface
+     */
+    protected $dataPersistor;
+
+    /**
+     * @var array
+     */
+    protected $loadedData;
+
+    /**
+     * DataProvider constructor
+     * @param string $name
+     * @param string $primaryFieldName
+     * @param string $requestFieldName
+     * @param ReportingInterface $reporting
+     * @param SearchCriteriaBuilder $searchCriteriaBuilder
+     * @param RequestInterface $request
+     * @param FilterBuilder $filterBuilder
+     * @param CollectionFactory $collectionFactory
+     * @param DataPersistorInterface $dataPersistor
+     * @param array $meta
+     * @param array $data
+     */
+    public function __construct(
+        $name,
+        $primaryFieldName,
+        $requestFieldName,
+        ReportingInterface $reporting,
+        SearchCriteriaBuilder $searchCriteriaBuilder,
+        RequestInterface $request,
+        FilterBuilder $filterBuilder,
+        CollectionFactory $collectionFactory,
+        DataPersistorInterface $dataPersistor,
+        array $meta = [],
+        array $data = []
+    ) {
+        $this->collection = $collectionFactory->create();
+        $this->dataPersistor = $dataPersistor;
+        parent::__construct($name, $primaryFieldName, $requestFieldName, $reporting,$searchCriteriaBuilder, $request, $filterBuilder, $meta, $data);
+        $this->meta = $this->prepareMeta($this->meta);
+    }
+
+    /**
+     * Prepares Meta
+     *
+     * @param array $meta
+     * @return array
+     */
+    public function prepareMeta(array $meta)
+    {
+        return $meta;
+    }
+
+    /**
+     * Get data
+     *
+     * @return array
+     */
+    public function getData()
+    {
+        if (isset($this->loadedData)) {
+            return $this->loadedData;
+        }
+        $items = $this->collection->getItems();
+
+        foreach ($items as $item) {
+            $this->loadedData[$item->getId()] = $item->getData();
+        }
+
+        $data = $this->dataPersistor->get(\''.$persistKey.'\');
+        if (!empty($data)) {
+            $item = $this->collection->getNewEmptyItem();
+            $item->setData($data);
+            $this->loadedData[$item->getId()] = $item->getData();
+            $this->dataPersistor->clear(\''.$persistKey.'\');
+        }
+
+        return $this->loadedData;
+    }
+';
 }
 
 function createDataProviderClassBodyString($module_info, $modelClass)
@@ -275,6 +377,7 @@ function createDataProviderClassBodyString($module_info, $modelClass)
     protected $loadedData;
 
     /**
+     * DataProvider constructor
      * @param string $name
      * @param string $primaryFieldName
      * @param string $requestFieldName
@@ -351,16 +454,26 @@ function createDataProviderClassNameFromModelClassName($modelClass)
     return $modelClass . '\DataProvider';
 }
 
-function createDataProvider($module_info, $modelClass)
+function createDataProvider($module_info, $modelClass, $useViewElementDataProvider)
 {
     // $moduleBasePath = getModuleBasePath();
     $dataProviderClassName = createDataProviderClassNameFromModelClassName($modelClass);
-    $contents           = createClassWithUse(
-        $dataProviderClassName, 
-        '\Magento\Ui\DataProvider\AbstractDataProvider',
-        createDataProviderUseString($module_info, $modelClass),
-        createDataProviderClassBodyString($module_info, $modelClass)        
-    );        
+    if(!$useViewElementDataProvider){
+        $contents           = createClassWithUse(
+            $dataProviderClassName,
+            '\Magento\Ui\DataProvider\AbstractDataProvider',
+            createDataProviderUseString($module_info, $modelClass),
+            createDataProviderClassBodyString($module_info, $modelClass)
+        );
+    }else{
+        $contents           = createClassWithUse(
+            $dataProviderClassName,
+            '\Magento\Framework\View\Element\UiComponent\DataProvider\DataProvider',
+            createViewDataProviderUseString($module_info, $modelClass),
+            createViewDataProviderClassBodyString($module_info, $modelClass)
+        );
+    }
+
     output("Creating: $dataProviderClassName");
     $return             = createClassFile($dataProviderClassName,$contents);        
     
@@ -715,11 +828,12 @@ function createUiComponentXmlFile($module_info, $modelClass, $aclRule)
 * @argument model Model Class? [Pulsestorm\Formexample\Model\Thing]
 * @argument aclRule ACL Rule for Controllers? [Pulsestorm_Formexample::ruleName]
 */
-function pestle_cli($argv)
+function pestle_cli($argv, $options)
 {
+    $useViewElementDataProvider = is_null($options['use-view-element-data-provider']) ? false : true;
     $module_info      = getModuleInformation($argv['module']);
     createControllerFiles($module_info, $argv['model'], $argv['aclRule']);
-    createDataProvider($module_info, $argv['model']);
+    createDataProvider($module_info, $argv['model'], $useViewElementDataProvider);
     createLayoutXmlFiles($module_info, $argv['model']);
     createUiComponentXmlFile($module_info, $argv['model'], $argv['aclRule']);
 }
